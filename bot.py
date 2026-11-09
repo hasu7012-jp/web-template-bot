@@ -1,211 +1,347 @@
-from collections import Counter
 import datetime
-import time
-from playwright.sync_api import sync_playwright
-
-# 分析したいサイトのURLリスト（好きなデザインサイトのURLを増やせます）
-TARGET_URLS = [
-    "https://gsap.com",
-]
+import json
+import urllib.request
+import xml.etree.ElementTree as ET
 
 
-def analyze_and_generate():
-  detected_libs = set()
-  all_colors = []
+def get_weather():
+  # 横浜市の緯度・経度（必要に応じて変更可能）
+  lat, lon = 35.4437, 139.6380
+  url = f"https://open-meteo.com{lat}&longitude={lon}&current=temperature_2m,weather_code&daily=temperature_2m_max,temperature_2m_min&timezone=Asia%2FTokyo"
+  try:
+    req = urllib.request.urlopen(url, timeout=10)
+    data = json.loads(req.read().decode("utf-8"))
+    current_temp = round(data["current"]["temperature_2m"], 1)
+    max_temp = round(data["daily"]["temperature_2m_max"], 1)
+    min_temp = round(data["daily"]["temperature_2m_min"], 1)
+    code = data["current"]["weather_code"]
 
-  with sync_playwright() as p:
-    browser = p.chromium.launch(headless=True)
-    page = browser.new_page()
+    # 天気コードの変換
+    if code == 0:
+      weather_text, icon = "快晴", "☀️"
+    elif code in:
+      weather_text, icon = "晴れ / くもり", "⛅"
+    elif code in:
+      weather_text, icon = "霧", "🌫️"
+    elif code in:
+      weather_text, icon = "雨", "☔"
+    elif code in:
+      weather_text, icon = "雪", "❄️"
+    elif code in:
+      weather_text, icon = "雷雨", "⚡"
+    else:
+      weather_text, icon = "くもり", "☁️"
 
-    for url in TARGET_URLS:
-      try:
-        print(f"分析中: {url}")
-        page.goto(url, wait_until="networkidle", timeout=30000)
-        time.sleep(2)
+    return {
+        "temp": current_temp,
+        "max": max_temp,
+        "min": min_temp,
+        "text": weather_text,
+        "icon": icon,
+    }
+  except Exception as e:
+    print(f"天気取得エラー: {e}")
+    return {"temp": "--", "max": "--", "min": "--", "text": "取得中", "icon": "🌤️"}
 
-        # 1. アニメーション系ライブラリの検出
-        scripts = page.evaluate(
-            "() => Array.from(document.scripts).map(s => s.src).filter(src =>"
-            " src)"
-        )
-        keywords = {
-            "gsap": "GSAP",
-            "three": "Three.js",
-            "lenis": "Lenis",
-            "aos": "AOS",
-            "swiper": "Swiper",
-        }
-        for src in scripts:
-          for k, v in keywords.items():
-            if k in src.lower():
-              detected_libs.add(v)
 
-        # 2. 使われている色の抽出
-        colors = page.evaluate("""() => {
-                    const elements = document.querySelectorAll('*');
-                    const list = [];
-                    for (let i = 0; i < Math.min(elements.length, 200); i++) {
-                        const style = window.getComputedStyle(elements[i]);
-                        list.push(style.backgroundColor);
-                        list.push(style.color);
-                    }
-                    return list;
-                }""")
-        valid = [
-            c
-            for c in colors
-            if c
-            not in (
-                "rgba(0, 0, 0, 0)",
-                "",
-                "rgb(255, 255, 255)",
-                "rgb(0, 0, 0)",
-            )
-        ]
-        all_colors.extend(valid)
+def get_news():
+  # NHKニュース（主要）のRSSから最新トピックを取得
+  rss_url = "https://nhk.or.jp"
+  news_list = []
+  try:
+    req = urllib.request.urlopen(rss_url, timeout=10)
+    xml_data = req.read()
+    root = ET.fromstring(xml_data)
+    for item in root.findall(".//item")[:4]:
+      title = item.find("title").text
+      news_list.append(title)
+  except Exception as e:
+    print(f"ニュース取得エラー: {e}")
+    news_list = ["最新ニュースの取得待機中です。"]
+  return news_list
 
-      except Exception as e:
-        print(f"スキップ ({url}): {e}")
 
-    browser.close()
+def generate_dashboard():
+  weather = get_weather()
+  news_list = get_news()
 
-  # 一番多く使われていた色を抽出（見つからない場合はデフォルトのネオンカラー）
-  top_colors = Counter(all_colors).most_common(3)
-  primary_color = top_colors[0][0] if len(top_colors) > 0 else "#00f2fe"
-  accent_color = top_colors[1][0] if len(top_colors) > 1 else "#4facfe"
-  now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+  # 日本時間の取得
+  jst = datetime.timezone(datetime.timedelta(hours=9))
+  now_jst = datetime.datetime.now(jst)
+  updated_str = now_jst.strftime("%H:%M 更新")
 
-  # 3. アニメーション付きHTMLテンプレートの生成
+  news_html = "".join(
+      [f'<div class="news-item">• {title}</div>' for title in news_list]
+  )
+
   html_content = f"""<!DOCTYPE html>
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Auto Generated Animated Template</title>
-    <script src="https://cloudflare.com"></script>
-    <script src="https://cloudflare.com"></script>
+    <!-- 30分ごとに自動で最新情報へリロード -->
+    <meta http-equiv="refresh" content="1800">
+    <title>Smart Echo Dashboard</title>
+    <link href="https://googleapis.com" rel="stylesheet">
     <style>
-        :root {{
-            --primary: {primary_color};
-            --accent: {accent_color};
+        * {{
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            user-select: none;
         }}
-        * {{ margin: 0; padding: 0; box-sizing: border-box; font-family: sans-serif; }}
         body {{
-            background-color: #0d0d12;
-            color: #ffffff;
-            overflow-x: hidden;
-        }}
-        .hero {{
+            width: 100vw;
             height: 100vh;
+            overflow: hidden;
+            background: #0b0f19;
+            color: #ffffff;
+            font-family: 'Inter', 'Noto Sans JP', sans-serif;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding: 4vh 5vw;
+            position: relative;
+        }}
+        /* 背景のゆっくり動く光のオーブ */
+        .bg-orb {{
+            position: absolute;
+            border-radius: 50%;
+            filter: blur(90px);
+            z-index: 0;
+            opacity: 0.45;
+            animation: floatOrb 18s infinite alternate ease-in-out;
+        }}
+        .orb-1 {{
+            width: 45vw;
+            height: 45vw;
+            background: #1d4ed8;
+            top: -10%;
+            left: -10%;
+        }}
+        .orb-2 {{
+            width: 40vw;
+            height: 40vw;
+            background: #0f766e;
+            bottom: -15%;
+            right: -5%;
+            animation-delay: -6s;
+        }}
+        @keyframes floatOrb {{
+            0% {{ transform: translate(0, 0) scale(1); }}
+            100% {{ transform: translate(5vw, 4vh) scale(1.1); }}
+        }}
+
+        /* メインレイアウト（Echo Show横画面最適化） */
+        .main-grid {{
+            position: relative;
+            z-index: 1;
+            display: grid;
+            grid-template-columns: 1.3fr 1fr;
+            gap: 4vw;
+            align-items: center;
+            height: 68%;
+        }}
+
+        /* 左側：時計＆日付 */
+        .clock-area {{
             display: flex;
             flex-direction: column;
             justify-content: center;
+        }}
+        .date-display {{
+            font-size: clamp(1.2rem, 2.5vw, 2.2rem);
+            color: #94a3b8;
+            font-weight: 500;
+            letter-spacing: 0.05em;
+            margin-bottom: 1vh;
+        }}
+        .time-display {{
+            font-size: clamp(4.5rem, 11vw, 9.5rem);
+            font-weight: 700;
+            line-height: 1;
+            letter-spacing: -0.03em;
+            display: flex;
+            align-items: baseline;
+        }}
+        .seconds {{
+            font-size: clamp(1.8rem, 4vw, 3.5rem);
+            color: #38bdf8;
+            margin-left: 1vw;
+            font-weight: 500;
+        }}
+
+        /* 右側：天気カード（グラスモーフィズム） */
+        .weather-card {{
+            background: rgba(255, 255, 255, 0.07);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            backdrop-filter: blur(20px);
+            border-radius: 28px;
+            padding: 3.5vh 3vw;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            height: 100%;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+        }}
+        .weather-header {{
+            display: flex;
+            justify-content: space-between;
             align-items: center;
-            text-align: center;
-            background: radial-gradient(circle at center, var(--primary) 0%, #0d0d12 70%);
+            color: #cbd5e1;
+            font-size: clamp(0.9rem, 1.5vw, 1.2rem);
         }}
-        .hero h1 {{
-            font-size: 4rem;
-            letter-spacing: 0.1em;
-            opacity: 0;
-            transform: translateY(40px);
+        .weather-main {{
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin: 1vh 0;
         }}
-        .hero p {{
-            margin-top: 20px;
-            font-size: 1.2rem;
-            color: #cccccc;
-            opacity: 0;
+        .weather-icon {{
+            font-size: clamp(3.5rem, 7vw, 6rem);
         }}
-        .section {{
-            padding: 100px 20px;
-            max-width: 1000px;
-            margin: 0 auto;
+        .weather-temp {{
+            font-size: clamp(3rem, 6.5vw, 5.5rem);
+            font-weight: 700;
         }}
-        .card-grid {{
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-            gap: 30px;
-            margin-top: 50px;
+        .weather-footer {{
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+            padding-top: 1.5vh;
+            font-size: clamp(0.9rem, 1.6vw, 1.3rem);
         }}
-        .card {{
-            background: rgba(255, 255, 255, 0.05);
-            border: 1px solid var(--accent);
-            border-radius: 16px;
-            padding: 40px 25px;
-            backdrop-filter: blur(10px);
-            opacity: 0;
-            transform: translateY(50px);
-            transition: transform 0.3s ease, box-shadow 0.3s ease;
-        }}
-        .card:hover {{
-            transform: translateY(-10px) scale(1.02);
-            box-shadow: 0 15px 30px rgba(0, 0, 0, 0.5);
-        }}
-        .badge {{
-            display: inline-block;
-            padding: 5px 12px;
-            background: var(--accent);
-            color: #000;
-            font-weight: bold;
+        .temp-high {{ color: #f87171; font-weight: 700; }}
+        .temp-low {{ color: #60a5fa; font-weight: 700; margin-left: 1vw; }}
+
+        /* 下部：ニュースティッカー */
+        .news-bar {{
+            position: relative;
+            z-index: 1;
+            height: 24%;
+            background: rgba(15, 23, 42, 0.65);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(15px);
             border-radius: 20px;
+            padding: 2vh 2.5vw;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }}
+        .news-label {{
             font-size: 0.8rem;
-            margin-bottom: 15px;
+            color: #38bdf8;
+            font-weight: 700;
+            letter-spacing: 0.15em;
+            margin-bottom: 0.8vh;
+            display: flex;
+            justify-content: space-between;
+        }}
+        .news-list {{
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0.8vh 2vw;
+        }}
+        .news-item {{
+            font-size: clamp(0.85rem, 1.4vw, 1.15rem);
+            color: #e2e8f0;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }}
     </style>
 </head>
 <body>
 
-    <section class="hero">
-        <h1 class="hero-title">NEXT GEN DESIGN</h1>
-        <p class="hero-sub">Auto-generated at {now_str} | Detected: {', '.join(detected_libs) if detected_libs else 'GSAP'}</p>
-    </section>
+    <div class="bg-orb orb-1"></div>
+    <div class="bg-orb orb-2"></div>
 
-    <section class="section">
-        <h2>Interactive Features</h2>
-        <div class="card-grid">
-            <div class="card">
-                <span class="badge">ANIMATION 01</span>
-                <h3>Smooth Entrance</h3>
-                <p>GSAPを使った滑らかなフェードイン＆スライドアニメーションを実装しています。</p>
-            </div>
-            <div class="card">
-                <span class="badge">ANIMATION 02</span>
-                <h3>Scroll Trigger</h3>
-                <p>スクロール位置に合わせて要素が順番に浮かび上がるモダンな演出です。</p>
-            </div>
-            <div class="card">
-                <span class="badge">STYLE</span>
-                <h3>Dynamic Palette</h3>
-                <p>収集したトレンドカラー（{primary_color}）を自動でテーマに反映しました。</p>
+    <div class="main-grid">
+        <div class="clock-area">
+            <div class="date-display" id="date">----年--月--日 (---)</div>
+            <div class="time-display">
+                <span id="hm">--:--</span>
+                <span class="seconds" id="sec">--</span>
             </div>
         </div>
-    </section>
+
+        <div class="weather-card">
+            <div class="weather-header">
+                <span>YOKOHAMA / WEATHER</span>
+                <span>{updated_str}</span>
+            </div>
+            <div class="weather-main">
+                <div class="weather-icon">{weather['icon']}</div>
+                <div class="weather-temp">{weather['temp']}°</div>
+            </div>
+            <div class="weather-footer">
+                <span>{weather['text']}</span>
+                <div>
+                    <span class="temp-high">H: {weather['max']}°</span>
+                    <span class="temp-low">L: {weather['min']}°</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="news-bar">
+        <div class="news-label">
+            <span>LATEST HEADLINES</span>
+            <span>AUTO SYNCED</span>
+        </div>
+        <div class="news-list">
+            {news_html}
+        </div>
+    </div>
 
     <script>
-        gsap.registerPlugin(ScrollTrigger);
+        function updateClock() {{
+            const now = new Date();
+            const days = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
+            const year = now.getFullYear();
+            const month = String(now.getMonth() + 1).padStart(2, '0');
+            const date = String(now.getDate()).padStart(2, '0');
+            const day = days[now.getDay()];
 
-        gsap.to(".hero-title", {{ opacity: 1, y: 0, duration: 1.2, ease: "power4.out" }});
-        gsap.to(".hero-sub", {{ opacity: 1, duration: 1, delay: 0.5 }});
+            const hours = String(now.getHours()).padStart(2, '0');
+            const minutes = String(now.getMinutes()).padStart(2, '0');
+            const seconds = String(now.getSeconds()).padStart(2, '0');
 
-        gsap.to(".card", {{
-            scrollTrigger: {{
-                trigger: ".card-grid",
-                start: "top 80%",
-            }},
-            opacity: 1,
-            y: 0,
-            duration: 0.8,
-            stagger: 0.2,
-            ease: "back.out(1.7)"
-        }});
-    </script>
-</body>
-</html>
+            document.getElementById('date').textContent = `${{year}}.${{month}}.${{date}} [${{day}}]`;
+            document.getElementById('hm').textContent = `${{hours}}:${{minutes}}`;
+            document.getElementById('sec').textContent = seconds;
+
+            // 時間帯によって背景オーブの色を自動変化
+            const h = now.getHours();
+            const orb1 = document.querySelector('.orb-1');
+            const orb2 = document.querySelector('.orb-2');
+if (h >= 5 && h < 11) {{
+// 朝：爽やかなシアン・ブルー
+orb1.style.background = '#0284c7';
+orb2.style.background = '#10b981';
+}} else if (h >= 11 && h < 16) {{
+// 昼：明るいブルー・インディゴ
+orb1.style.background = '#2563eb';
+orb2.style.background = '#06b6d4';
+}} else if (h >= 16 && h < 19) {{
+// 夕方：サンセットオレンジ・パープル
+orb1.style.background = '#ea580c';
+orb2.style.background = '#7c3aed';
+}} else {{
+// 夜：落ち着いたディープブルー・ティール
+orb1.style.background = '#1e3a8a';
+orb2.style.background = '#0f766e';
+}}
+}}
+setInterval(updateClock, 1000);
+updateClock();
+
+
+
 """
-  with open("index.html", "w", encoding="utf-8") as f:
-    f.write(html_content)
-  print("index.html の生成が完了しました！")
-
-
-if __name__ == "__main__":
-  analyze_and_generate()
+with open("index.html", "w", encoding="utf-8") as f:
+f.write(html_content)
+print("スマートダッシュボードの生成が完了しました！")
+if name == "main":
+generate_dashboard()
