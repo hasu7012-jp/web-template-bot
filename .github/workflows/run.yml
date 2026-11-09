@@ -1,0 +1,38 @@
+name: Auto Template Generator Bot
+
+on:
+  schedule:
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-template:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Playwright
+        run: |
+          pip install playwright
+          playwright install chromium
+
+      - name: Run bot
+        run: python bot.py
+
+      - name: Commit and push generated HTML
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "Template Bot"
+          git add index.html
+          git commit -m "Update generated template" || exit 0
+          git push
